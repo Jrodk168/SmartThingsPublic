@@ -671,6 +671,17 @@ def updated() {
     initialize()
 }
 
+def uninstalled() {
+	LOG("uninstalled() called", 4, null, "warn")
+    def children = getChildApps()
+	LOG( "Found ${children.size()} child apps installed. Getting ready to delete.", 4, null, "debug")
+	children.each { child ->
+    	LOG( "Child app id: ${child.id} being deleted", 4, null, "debug")
+        // deleteChildDevice(child.id)
+	}
+
+}
+
 def initialize() {	
     LOG("=====> initialize()", 4)    
     
@@ -1934,7 +1945,7 @@ private def getSmartThingsClientId() {
 
 private def LOG(message, level=3, child=null, logType="debug", event=false, displayEvent=true) {
 	def prefix = ""
-    def logTypes = ["error", "debug", "info", "trace"]
+    def logTypes = ["error", "debug", "info", "trace", "warn"]
     
     if(!logTypes.contains(logType)) {
     	log.error "LOG() - Received logType ${logType} which is not in the list of allowed types."
