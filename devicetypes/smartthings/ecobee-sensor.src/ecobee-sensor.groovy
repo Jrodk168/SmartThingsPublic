@@ -16,8 +16,8 @@
  *
  */
 
-def getVersionNum() { return "0.9.8" }
-private def getVersionLabel() { return "Ecobee Sensor Version ${getVersionNum()}-RC8" }
+def getVersionNum() { return "1.0" }
+private def getVersionLabel() { return "Ecobee Sensor Version ${getVersionNum()}" }
 
 metadata {
 	definition (name: "Ecobee Sensor", namespace: "smartthings", author: "SmartThings") {
@@ -25,7 +25,6 @@ metadata {
 		capability "Temperature Measurement"
 		capability "Motion Sensor"
 		capability "Refresh"
-		capability "Polling"
 	}
 
 	simulator {
@@ -71,7 +70,7 @@ metadata {
         standardTile("motion", "device.motion", width: 2, height: 2, inactiveLabel: false, decoration: "flat") {
 			state "active", action:"noOp", nextState: "active", label:"Motion", icon:"https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/motion_sensor_motion.png"
 			state "inactive", action: "noOp", nextState: "inactive", label:"No Motion", icon:"https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/motion_sensor_nomotion.png"
-            state "unkown", action: "noOp", label:"Offline", nextState: "unkown", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/motion_sensor_noconnection.png"
+            state "unknown", action: "noOp", label:"Offline", nextState: "unknown", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/motion_sensor_noconnection.png"
             state "not supported", action: "noOp", nextState: "not supported", label: "N/A", icon:"https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/notsupported_x.png"
 		}
 /*

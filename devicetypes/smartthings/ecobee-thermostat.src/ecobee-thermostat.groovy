@@ -24,7 +24,7 @@
  *
  */
 
-def getVersionNum() { return "0.9.10" }
+def getVersionNum() { return "0.99" }
 private def getVersionLabel() { return "Ecobee Thermostat Version ${getVersionNum()}" }
 
  
@@ -32,7 +32,6 @@ metadata {
 	definition (name: "Ecobee Thermostat", namespace: "smartthings", author: "SmartThings") {
 		capability "Actuator"
 		capability "Thermostat"
-		capability "Polling"
         capability "Sensor"
 		capability "Refresh"
 		capability "Relative Humidity Measurement"
@@ -63,6 +62,13 @@ metadata {
         command "sleep"
         command "away"
         
+        command "setFanMinOnTime"  // Ecobee Specific command. Allows to set the minimum time that the fan should run
+		command "fanMinOnTime0"
+        command "fanMinOnTime15"
+		command "fanMinOnTime30"
+		command "fanMinOnTime45"
+		command "fanMinOnTime60"        
+        
         command "fanOff"  // Missing from the Thermostat standard capability set
         command "noOp" // Workaround for formatting issues 
         command "setStateVariable"
@@ -82,6 +88,7 @@ metadata {
         attribute "logo", "string"
         attribute "timeOfDate", "enum", ["day", "night"]
         attribute "lastPoll", "string"
+        attribute "fanMinOnTime", "number"
 	}
 
 	simulator { }
@@ -95,6 +102,8 @@ metadata {
 
 			tileAttribute("device.temperature", key: "VALUE_CONTROL") {
                 attributeState("default", action: "setTemperature")
+                attributeState("VALUE_UP", action: "raiseSetpoint")
+    			attributeState("VALUE_DOWN", action: "lowerSetpoint")
 			}
             tileAttribute("device.humidity", key: "SECONDARY_CONTROL") {
 				attributeState("default", label:'${currentValue}%', unit:"%")
@@ -333,6 +342,15 @@ metadata {
 			state "inactive", action: "noOp", nextState: "inactive", label:"No Motion", icon:"https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/motion_sensor_nomotion.png"
             state "not supported", action: "noOp", nextState: "not supported", label: "N/A", icon:"https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/notsupported_x.png"
 		}
+        
+		standardTile("fanMinOnTimeButton", "device.fanMinOnTime", width: 2, height: 2, inactiveLabel: false, decoration: "flat") {
+			state "0",  label:'At least 0 min', action:"fanMinOnTime15", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan.png"
+            state "15", label:'At least 15 min', action:"fanMinOnTime30", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan.png"
+            state "30", label:'At least 30 min', action:"fanMinOnTime45", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan.png"
+			state "45", label:'At least 45 min', action:"fanMinOnTime60", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan.png"
+            state "60", label:'At least 60 min', action:"fanMinOnTime0", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan.png"            
+			state "updating", label:"Working...", icon: "st.samsung.da.oven_ic_send"
+		}
 
         // Weather Tiles and other Forecast related tiles
 		standardTile("weatherIcon", "device.weatherSymbol", inactiveLabel: false, width: 2, height: 2, decoration: "flat") {
@@ -424,7 +442,7 @@ metadata {
             // "currentProgram", "apiStatus",
             "setHome", "setAway", "setSleep",
             "setModeHeat", "setModeCool", "setModeAuto",
-            "apiStatus", "lastPoll"
+            "apiStatus", "fanMinOnTimeButton", "lastPoll"
             // "fanOffButton", "fanCirculate", "setVariable"
             ])            
 	}
@@ -695,6 +713,42 @@ void resumeProgram() {
 	generateStatusEvent()    
 }
 
+
+def setFanMinOnTime(howLong=0) {
+	LOG("setFanMinOnTime() called with value: ${howLong}", 5)
+    if (device.currentValue("fanMinOnTime") == howLong) return true
+    
+    generateQuickEvent("fanMinOnTime", howLong)
+    def result = parent.setFanMinOnTime(this, deviceId, howLong)
+    if (result) generateQuickEvent("fanMinOnTime", howLong, 30)
+    
+    return result
+}
+
+def fanMinOnTime0() {
+	setFanMinOnTime(0)
+}
+
+def fanMinOnTime15() {
+	LOG("fanMinOnTime15() called", 5)
+	setFanMinOnTime(15)
+}
+
+def fanMinOnTime30() {
+	setFanMinOnTime(30)
+}
+
+def fanMinOnTime45() {
+	setFanMinOnTime(45)
+}
+
+def fanMinOnTime60() {
+	setFanMinOnTime(60)
+}
+
+
+
+
 /*
 def modes() {
 	if (state.modes) {
@@ -720,7 +774,8 @@ def generateQuickEvent(name, value) {
 }
 
 def generateQuickEvent(name, value, pollIn) {
-	sendEvent(name: name, value: value, displayed: true)
+	LOG("generateQuickEvent(${name}, ${value}, ${pollIn}) called", 5)
+	sendEvent(name: "${name}", value: "${value}", displayed: true, isStateChange: true)
     if (pollIn > 0) { runIn(pollIn, "poll") }
 }
 
@@ -963,11 +1018,11 @@ void raiseSetpoint() {
 	sendEvent("name":"thermostatSetpoint", "value":( wantMetric() ? targetvalue : targetvalue.round(0).toInteger() ), displayed: true)
 	LOG("In mode $mode raiseSetpoint() to $targetvalue", 4)
 
-	def runWhen = parent.settings?.arrowPause ?: 4		
+	def runWhen = parent.settings?.arrowPause.toInteger() ?: 4		
 	runIn(runWhen, "alterSetpoint", [data: [value:targetvalue], overwrite: true]) //when user click button this runIn will be overwrite
 }
 
-//called by tile when user hit raise temperature button on UI
+//called by tile when user hit lower temperature button on UI
 void lowerSetpoint() {
 	def mode = device.currentValue("thermostatMode")
 	def targetvalue
@@ -995,8 +1050,11 @@ void lowerSetpoint() {
 		sendEvent("name":"thermostatSetpoint", "value":( wantMetric() ? targetvalue : targetvalue.round(0).toInteger() ), displayed: true)
 		LOG("In mode $mode lowerSetpoint() to $targetvalue", 5, null, "info")
 
-		// Wait 4 seconds before sending in case we hit the buttons again
-		runIn(4, "alterSetpoint", [data: [value:targetvalue], overwrite: true]) //when user click button this runIn will be overwrite
+		def runWhen = parent.settings?.arrowPause.toInteger() ?: 4		
+		runIn(runWhen, "alterSetpoint", [data: [value:targetvalue], overwrite: true]) //when user click button this runIn will be overwrite
+		
+        // Wait 4 seconds before sending in case we hit the buttons again
+		//runIn(4, "alterSetpoint", [data: [value:targetvalue], overwrite: true]) //when user click button this runIn will be overwrite
 	}
 
 }
