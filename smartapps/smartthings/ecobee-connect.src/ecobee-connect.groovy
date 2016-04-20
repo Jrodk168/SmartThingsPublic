@@ -25,7 +25,7 @@
  *  See Changelog for change history
  *
  */  
-def getVersionNum() { return "0.9.16" }
+def getVersionNum() { return "0.99" }
 private def getVersionLabel() { return "Ecobee (Connect) Version ${getVersionNum()}" }
 private def getHelperSmartApps() {
 	return [ 
@@ -1242,8 +1242,11 @@ private def pollEcobeeAPI(thermostatIdsString = "") {
         // Do not add an else statement to run immediately as this could cause an long looping cycle if the API is offline
         if ( canSchedule() ) { runIn(atomicState.reAttemptInterval, "pollChildren") }
         result = false    
+    } catch (org.apache.http.conn.ConnectTimeoutException e) { 
+    	LOG("pollEcobeeAPI(), org.apache.http.conn.ConnectTimeoutException: ${e}. Unable to reach Ecobee API Servers. Perhaps Server Maintenance is being performed?", 1, null, "warn")
+    	// Unable to communicate with the servers. Possibly due to Server Maintenance.
+        result = false    
     } catch (Exception e) {
-    // TODO: Handle "org.apache.http.conn.ConnectTimeoutException" as this is a transient error and shouldn't count against our retries
 		LOG("pollEcobeeAPI(): General Exception: ${e}.", 1, null, "error")
         atomicState.reAttemptPoll = atomicState.reAttemptPoll + 1
         if (atomicState.reAttemptPoll > 3) {        
@@ -1262,8 +1265,7 @@ private def pollEcobeeAPI(thermostatIdsString = "") {
     }
     LOG("<===== Leaving pollEcobeeAPI() results: ${result}", 5)
    
-	return result
-    
+	return result    
 }
 
 // poll() will be called on a regular interval using an runEveryX command
@@ -1402,6 +1404,9 @@ def updateThermostatData() {
         LOG("Climates available: ${stat.program?.climates}", 4)
         // Extract Climates
         def climateData = stat.program?.climates
+     
+        LOG("fanMinOnTime == ${stat.settings.fanMinOnTime}", 4)
+        
         
         // TODO: Put a wrapper here based on the thermostat brand
         def thermSensor = stat.remoteSensors.find { it.type == "thermostat" }
@@ -1494,6 +1499,7 @@ def updateThermostatData() {
 		coolingSetpoint: usingMetric ? tempCoolingSetpoint : tempCoolingSetpoint.toInteger(),
 		thermostatMode: stat.settings.hvacMode,
 		thermostatFanMode: currentFanMode,
+        fanMinOnTime: stat.settings.fanMinOnTime,
 		humidity: stat.runtime.actualHumidity,
 		motion: occupancy,
 		thermostatOperatingState: getThermostatOperatingState(stat),
@@ -1654,23 +1660,12 @@ private refreshAuthToken(child=null) {
 			// Likely bad luck and network overload, move on and let it try again
             if(canSchedule()) { runIn(atomicState.reAttemptInterval, "refreshAuthToken") } else { refreshAuthToken() }            
             return false
-        } catch (Exception e) {
-        	LOG("refreshAuthToken(), General Exception: ${e}.", 1, child, "error")            
-            /*
-            atomicState.reAttempt = atomicState.reAttempt + 1
-	        if (atomicState.reAttempt > 3) {                       	
-   		    	apiLost("Too many retries (${atomicState.reAttempt - 1}) for token refresh.")        	    
-           	    return false
-	        } else {
-       			if ( canSchedule() ) {
-           			// atomicState.connected = "warn"
-					runIn(atomicState.reAttemptInterval, "refreshAuthToken") 
-				} else { 
-   	        		LOG("Unable to schedule refreshAuthToken, running directly", 2, child, "warn")
-					// atomicState.connected = "warn"
-        	    	refreshAuthToken(child) 
-   	        	}
-       		} */
+        } catch (org.apache.http.conn.ConnectTimeoutException e) { 
+    		LOG("refreshAuthToken(), org.apache.http.conn.ConnectTimeoutException: ${e}. Unable to reach Ecobee API Servers. Perhaps Server Maintenance is being performed?", 1, null, "warn")
+    		// Unable to communicate with the servers. Possibly due to Server Maintenance.
+			return false    
+    	} catch (Exception e) {
+        	LOG("refreshAuthToken(), General Exception: ${e}.", 1, child, "error")  
             return false
         }
     }
@@ -1829,7 +1824,7 @@ def setFanMode(child, fanMode, deviceId, sendHoldType=null) {
         thermostatFunctions = '{"type":"setHold","params":{"coolHoldTemp":"' + c + '","heatHoldTemp":"' + h + '","holdType":"' + holdType + '","fan":"'+fanMode+'","isTemperatureAbsolute":false,"isTemperatureRelative":false}}'
     }    
 	
-    // {"selection":{"selectionType":"thermostats","selectionMatch":"312989153500"},"functions":[{"type":"setHold","params":{"coolHoldTemp":"73","heatHoldTemp":"66","holdType":"nextTransition","fan":"circulate","isTemperatureAbsolute":false,"isTemperatureRelative":false}}],"thermostat":{"settings":{"fanMinOnTime":15}}}
+    // {"selection":{"selectionType":"thermostats","selectionMatch":"XXX"},"functions":[{"type":"setHold","params":{"coolHoldTemp":"73","heatHoldTemp":"66","holdType":"nextTransition","fan":"circulate","isTemperatureAbsolute":false,"isTemperatureRelative":false}}],"thermostat":{"settings":{"fanMinOnTime":15}}}
 	def jsonRequestBody = '{"selection":{"selectionType":"thermostats","selectionMatch":"' + deviceId + '"},"functions":['+thermostatFunctions+']'+thermostatSettings+'}'
     LOG("about to sendJson with jsonRequestBody (${jsonRequestBody}", 4, child)
     
