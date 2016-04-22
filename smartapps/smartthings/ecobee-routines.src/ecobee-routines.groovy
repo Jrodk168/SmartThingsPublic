@@ -14,7 +14,7 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  */
-def getVersionNum() { return "0.1.3" }
+def getVersionNum() { return "0.1.4" }
 private def getVersionLabel() { return "ecobee Routines Version ${getVersionNum()}" }
 
 
@@ -81,7 +81,8 @@ def mainPage() {
                 	LOG("Found the following programs: ${programs}", 4)
                     
 	               	input(name: "whichProgram", title: "Switch to this Ecobee Program: ", type: "enum", required: true, multiple:false, description: "Tap to choose...", options: programs, submitOnChange: true)
-    	       	    input(name: "fanMode", title: "Select a Fan Mode to use\n(Optional) ", type: "enum", required: false, multiple: false, description: "Tap to choose...", metadata:[values:["On", "Auto", "default"]], submitOnChange: true)
+    	       	    input(name: "fanMode", title: "Select a Fan Mode\n(Optional) ", type: "enum", required: false, multiple: false, defaultValue: "default", description: "Tap to choose...", metadata:[values:["On", "Auto", "default"]], submitOnChange: true)
+					input(name: "fanMinOnTime", title: "Select a Fan Minimum Runtime\n(Optional) ", type: "enum", required: false, multiple: false, defaultValue: "default", description: "Tap to choose...", metadata:[values:["0", "15", "30", "45", "60", "default"]], submitOnChange: true)
         	       	if(settings.whichProgram != "Resume Program") input(name: "holdType", title: "Select the Hold Type to use\n(Optional) ", type: "enum", required: false, multiple: false, description: "Tap to choose...", metadata:[values:["Until I Change", "Until Next Program", "default"]], submitOnChange: true)
             	   	input(name: "useSunriseSunset", title: "Also at Sunrise or Sunset?\n(Optional) ", type: "enum", required: false, multiple: true, description: "Tap to choose...", metadata:[values:["Sunrise", "Sunset"]], submitOnChange: true)                
                 }
@@ -111,7 +112,7 @@ def updated() {
 def initialize() {
 	LOG("initialize() entered")
     if(tempDisable == true) {
-    	LOG("Teporarily Disapabled as per request.", 2, null, "warn")
+    	LOG("Teporarily Disabled as per request.", 2, null, "warn")
     	return true
     }
 	
@@ -176,6 +177,18 @@ private def normalizeSettings() {
         }
     }
     
+    // fanMinOnTime
+    state.fanMinOnTimeCommand = ""
+    if (fanMinOnTime != null && fanMinOnTime != "") {
+    	LOG("fanMinOnTime == ${fanMinOnTime} is it a number? ${fanMinOnTime.isNumber()}", 5)
+    	if (fanMinOnTime.isNumber() ) {
+        	state.fanMinOnTimeCommand = "fanMinOnTime${fanMinOnTime}"
+        } else {
+        	state.fanMinOnTimeCommand = ""
+        }        	
+    }
+    
+    
     // holdType
     state.holdTypeParam = null
     if (holdType != null && holdType != "") {
@@ -215,6 +228,12 @@ def changeProgramHandler(evt) {
     
     settings.myThermostats.each { stat ->
     	LOG("In each loop: Working on stat: ${stat}", 4, null, "trace")
+        
+        // Change the FanMinOnTime if requested
+        LOG("Will try to execute fanMinOnTimeCommand: ${state.fanMinOnTimeCommand}", 5)
+        if (state.fanMinOnTimeCommand != "" && state.fanMinOnTimeCommand != null) stat."${state.fanMinOnTimeCommand}"()
+        // stat.setFanMinOnTime(45)
+        
     	// First let's change the Thermostat Program
         if(state.doResumeProgram == true) {
         	LOG("Resuming Program for ${stat}", 4, null, "trace")
