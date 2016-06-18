@@ -14,7 +14,7 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  */
-def getVersionNum() { return "0.1.4" }
+def getVersionNum() { return "0.1.5" }
 private def getVersionLabel() { return "ecobee Routines Version ${getVersionNum()}" }
 
 
@@ -88,7 +88,7 @@ def mainPage() {
                 }
             } // End if myThermostats size
             section(title: "Temporarily Disable?") {
-            	input(name: "tempDisable", title: "Temporarily Disable Handler? ", type: "bool", required: false, description: false, submitOnChange: true)                
+            	input(name: "tempDisable", title: "Temporarily Disable Handler? ", type: "bool", required: false, defaultValue: false, submitOnChange: true)                
         	}
         
         section (getVersionLabel())
@@ -232,7 +232,8 @@ def changeProgramHandler(evt) {
         // Change the FanMinOnTime if requested
         LOG("Will try to execute fanMinOnTimeCommand: ${state.fanMinOnTimeCommand}", 5)
         if (state.fanMinOnTimeCommand != "" && state.fanMinOnTimeCommand != null) stat."${state.fanMinOnTimeCommand}"()
-        // stat.setFanMinOnTime(45)
+        //stat.setFanMinOnTime(15)
+        //stat.fanMinOnTime30()
         
     	// First let's change the Thermostat Program
         if(state.doResumeProgram == true) {

@@ -23,6 +23,8 @@
  *      StrykerSKS - 12-11-2015 - Make it work (better) with the Ecobee 3
  *
  *  See Changelog for change history
+ *  General TODO:
+ *    - Add checks if mode has been changed by thermostat in order to restore fanMinOn times as needed
  *
  */  
 def getVersionNum() { return "0.99" }
@@ -101,6 +103,11 @@ def mainPage() {
         }       
 
 		if(atomicState.authToken != null && atomicState.initialized != true) {
+        	if (getHubID() == null) {
+            	section() {				
+        			input(name: "myHub", type: "hub", title: "Select your hub", multiple: false, required: true, submitOnChange	: true)
+     			} 
+			}
         	section() {
             	paragraph "Please click 'Done' to save your credentials. Then re-open the SmartApp to continue the setup."
             }
@@ -270,16 +277,17 @@ def preferencesPage() {
     LOG("=====> preferencesPage() entered. settings: ${settings}", 5)
 
     dynamicPage(name: "preferencesPage", title: "Update SmartApp Preferences", nextPage: "") {
+    	// TODO: Come back and readd bools when it is fixed!!!
 		section("SmartApp Preferences") {
         	input(name: "holdType", title:"Select Hold Type", type: "enum", required:false, multiple:false, defaultValue:  "Until I Change", description: "Until I Change", metadata:[values:["Until I Change", "Until Next Program"]])
             paragraph "The 'Smart Auto Temperature Adjust' feature determines if you want to allow the thermostat setpoint to be changed using the arrow buttons in the Tile when the thermostat is in 'auto' mode."
-            input(name: "smartAuto", title:"Use Smart Auto Temperature Adjust?", type: "bool", required:false, defaultValue: false, description: false)
+            input(name: "smartAuto", title:"Use Smart Auto Temperature Adjust?", type: "bool", required:false, defaultValue: false, description: "")
             input(name: "pollingInterval", title:"Polling Interval (in Minutes)", type: "enum", required:false, multiple:false, defaultValue:5, description: "5", options:["1", "3", "5", "10", "15", "30"])
             input(name: "debugLevel", title:"Debugging Level (higher # for more information)", type: "enum", required:false, multiple:false, defaultValue:3, description: "3", metadata:[values:["5", "4", "3", "2", "1", "0"]])            
             paragraph "Showing a Thermostat as a separate Sensor is useful if you need to access the actual temperature in the room where the Thermostat is located and not just the (average) temperature displayed on the Thermostat"
-            input(name: "showThermsAsSensor", title:"Include Thermostats as a separate Ecobee Sensor?", type: "bool", required:false, defaultValue: false, description: false)
+            input(name: "showThermsAsSensor", title:"Include Thermostats as a separate Ecobee Sensor?", type: "bool", required:false, defaultValue: false, description: "")
             paragraph "Monitoring external devices can be used to drive polling and the watchdog events. Be warned, however, not to select too many devices or devices that will send too many events as this can cause issues with the connection."
-            input(name: "useWatchdogDevices", title:"Monitor external devices to drive additional polling and watchdog events?", type: "bool", required:false, description:false, defaultValue:false)
+            input(name: "useWatchdogDevices", title:"Monitor external devices to drive additional polling and watchdog events?", type: "bool", required:false, description:"", defaultValue:false)
             paragraph "Set the pause between pressing the setpoint arrows and initiating the API calls. The pause needs to be long enough to allow you to click the arrow again for changing by more than one degree."
             input(name: "arrowPause", title:"Delay timer value after pressing setpoint arrows", type: "enum", required:false, multiple:false, description: "4", defaultValue:5, options:["1", "2", "3", "4", "5"])
         }
@@ -764,8 +772,8 @@ def initialize() {
 	atomicState.pollingInterval = getPollingInterval()
     atomicState.watchdogInterval = 15
     atomicState.reAttemptInterval = 15 // In seconds
-	
-    if (state.initialized) {		
+  
+    if (atomicState.initialized) {		
     	// refresh Thermostats and Sensor full lists
     	getEcobeeThermostats()
     	getEcobeeSensors()
@@ -825,7 +833,7 @@ private def createChildrenThermostats() {
 		def d = getChildDevice(dni)
 		if(!d) {        	
             try {
-				d = addChildDevice(app.namespace, getChildThermostatName(), dni, null, ["label":"EcoTherm: ${atomicState.thermostatsWithNames[dni]}", completedSetup:true])			
+				d = addChildDevice(app.namespace, getChildThermostatName(), dni, getHubID(), ["label":"EcoTherm: ${atomicState.thermostatsWithNames[dni]}", completedSetup:true])			
 			} catch (physicalgraph.app.exception.UnknownDeviceTypeException e) {
             	LOG("You MUST add the ${getChildSensorName()} Device Handler to the IDE BEFORE running the setup.", 1, null, "error")
                 return false
@@ -848,7 +856,7 @@ private def createChildrenSensors() {
 		def d = getChildDevice(dni)
 		if(!d) {        	
             try {
-				d = addChildDevice(app.namespace, getChildSensorName(), dni, null, ["label":"EcoSensor: ${atomicState.eligibleSensors[dni]}", completedSetup:true])
+				d = addChildDevice(app.namespace, getChildSensorName(), dni, getHubID(), ["label":"EcoSensor: ${atomicState.eligibleSensors[dni]}", completedSetup:true])
 			} catch (physicalgraph.app.exception.UnknownDeviceTypeException e) {
             	LOG("You MUST add the ${getChildSensorName()} Device Handler to the IDE BEFORE running the setup.", 1, null, "error")
                 return false
@@ -1476,37 +1484,37 @@ def updateThermostatData() {
         
         
         if (runningEvent) {
-        	currentFanMode = atomicState.circulateFanModeOn ? "circulate" : atomicState.offFanModeOn ? "off" : runningEvent.fan
+        	currentFanMode = getActiveFanMode(dni) ?: runningEvent.fan
         } else {
-        	currentFanMode = stat.runtime.desiredFanMode
+        	currentFanMode = getActiveFanMode(dni) ?: stat.runtime.desiredFanMode
         }
      
         
-	if (atomicState.hasInternalSensors) { occupancy = (occupancy == "true") ? "active" : "inactive" }
+		if (atomicState.hasInternalSensors) { occupancy = (occupancy == "true") ? "active" : "inactive" }
 
-	def data = [ 
-		temperatureScale: getTemperatureScale(),
-        lastPoll: atomicState.lastPollDate,
-		apiConnected: apiConnected(),
-		coolMode: (stat.settings.coolStages > 0),
-		heatMode: (stat.settings.heatStages > 0),
-		autoMode: stat.settings.autoHeatCoolFeatureEnabled,
-		currentProgramName: currentClimateName,
-		currentProgramId: currentClimateId,
-		auxHeatMode: (stat.settings.hasHeatPump) && (stat.settings.hasForcedAir || stat.settings.hasElectric || stat.settings.hasBoiler),
-		temperature: usingMetric ? tempTemperature : tempTemperature.toInteger(),
-		heatingSetpoint: usingMetric ? tempHeatingSetpoint : tempHeatingSetpoint.toInteger(),
-		coolingSetpoint: usingMetric ? tempCoolingSetpoint : tempCoolingSetpoint.toInteger(),
-		thermostatMode: stat.settings.hvacMode,
-		thermostatFanMode: currentFanMode,
-        fanMinOnTime: stat.settings.fanMinOnTime,
-		humidity: stat.runtime.actualHumidity,
-		motion: occupancy,
-		thermostatOperatingState: getThermostatOperatingState(stat),
-        timeOfDay: atomicState.timeOfDay,
-		weatherSymbol: stat.weather.forecasts[0].weatherSymbol.toString(),
-		weatherTemperature: usingMetric ? tempWeatherTemperature : tempWeatherTemperature.toInteger()
-	]
+		def data = [ 
+			temperatureScale: getTemperatureScale(),
+    	    lastPoll: atomicState.lastPollDate,
+			apiConnected: apiConnected(),
+			coolMode: (stat.settings.coolStages > 0),
+			heatMode: (stat.settings.heatStages > 0),
+			autoMode: stat.settings.autoHeatCoolFeatureEnabled,
+			currentProgramName: currentClimateName,
+			currentProgramId: currentClimateId,
+			auxHeatMode: (stat.settings.hasHeatPump) && (stat.settings.hasForcedAir || stat.settings.hasElectric || stat.settings.hasBoiler),
+			temperature: usingMetric ? tempTemperature : tempTemperature.toInteger(),
+			heatingSetpoint: usingMetric ? tempHeatingSetpoint : tempHeatingSetpoint.toInteger(),
+			coolingSetpoint: usingMetric ? tempCoolingSetpoint : tempCoolingSetpoint.toInteger(),
+			thermostatMode: stat.settings.hvacMode,
+			thermostatFanMode: currentFanMode,
+        	fanMinOnTime: stat.settings.fanMinOnTime,
+			humidity: stat.runtime.actualHumidity,
+			motion: occupancy,
+			thermostatOperatingState: getThermostatOperatingState(stat),
+	        timeOfDay: atomicState.timeOfDay,
+			weatherSymbol: stat.weather.forecasts[0].weatherSymbol.toString(),
+			weatherTemperature: usingMetric ? tempWeatherTemperature : tempWeatherTemperature.toInteger()
+		]
        
 		data["temperature"] = data["temperature"] ? ( wantMetric() ? data["temperature"].toDouble() : data["temperature"].toDouble().toInteger() ) : data["temperature"]
 		data["heatingSetpoint"] = data["heatingSetpoint"] ? ( wantMetric() ? data["heatingSetpoint"].toDouble() : data["heatingSetpoint"].toDouble().toInteger() ) : data["heatingSetpoint"]
@@ -1672,38 +1680,23 @@ private refreshAuthToken(child=null) {
 }
 
 def resumeProgram(child, deviceId) {
-	LOG("Entered resumeProgram for deviceID: ${deviceID}", 5, child)
+	LOG("Entered resumeProgram for deviceId: ${deviceId}", 5, child)
 	def result = true
-    
-    def previousFanMinOnTime = atomicState."previousFanMinOnTime${deviceId}"
-    def currentFanMinOnTime = getFanMinOnTime(child)
-    def previousHVACMode = atomicState."previousHVACMode${deviceId}"
-    def currentHVACMode = getHVACMode(child)
-    
-    LOG("resumeProgram() - atomicState.previousHVACMode = ${previousHVACMode} current (${currentHVACMode})   atomicState.previousFanMinOnTime = ${previousFanMinOnTime} current (${currentFanMinOnTime})", 4, child)	
-    if ((previousHVACMode != null) && (currentHVACMode != previousHVACMode)) {
-    	// Need to reset the HVAC Mode back to the previous state
-        if (currentHVACMode == "off") { atomicState.offFanModeOn = false }
-        if (currentHVACMode == "circulate") { atomicState.circulateFanModeOn = false }
-        
-        LOG("getHVACMode(child) != atomicState.previousHVACMode${deviceId} (${previousHVACMode})", 5, child, "trace")
-        result = setHVACMode(child, deviceId, previousHVACMode)       
+    def deviceNetworkId = child.device.deviceNetworkId
+    LOG("deviceNetworkId = ${deviceNetworkId}", 5, child, "trace")
+  
+  	Boolean restore = getRestoreModesOnChange(deviceNetworkId)	
+
+	LOG("getRestoreModesOnChange() - ${restore}", 4, child)	
+    if( restore ) {
+		restoreModesOnChange(child, deviceId)
     }
     
-    
-    if ((previousFanMinOnTime != null) && (currentFanMinOnTime != previousFanMinOnTime)) {
-    	// Need to reset the fanMinOnTime back to the previous settings              
-        
-        LOG("getFanMinOnTime(child) != atomicState.previousFanMinOnTime${deviceId} (${previousFanMinOnTime})", 5, child, "trace")
-        def fanResult = setFanMinOnTime(child, deviceId, previousFanMinOnTime)
-        result = result && fanResult      
-    }
-        
     // 					   {"functions":[{"type":"resumeProgram"}],"selection":{"selectionType":"thermostats","selectionMatch":"YYY"}}
     def jsonRequestBody = '{"functions":[{"type":"resumeProgram"}],"selection":{"selectionType":"thermostats","selectionMatch":"' + deviceId + '"}}'
 	LOG("jsonRequestBody = ${jsonRequestBody}", 4, child)
     
-	result = sendJson(jsonRequestBody) && result
+	result = sendJson(child, jsonRequestBody) && result
     LOG("resumeProgram(child) with result ${result}", 3, child)
 
     return result
@@ -1715,8 +1708,10 @@ def setHVACMode(child, deviceId, mode) {
     def thermostatFunctions = ''
 	def jsonRequestBody = '{"selection":{"selectionType":"thermostats","selectionMatch":"' + deviceId + '"},"functions":['+thermostatFunctions+']'+thermostatSettings+'}'
 	
+    // Save the previous HVAC Mode in case needed on resume
+    setPrevHVACMode(child.device.deviceNetworkId, getHVACMode(child))
     def result = sendJson(child, jsonRequestBody)
-    LOG("setHVACMode(child) with result ${result}", 3, child)    
+    LOG("setHVACMode(child) with result ${result}", 3, child)
 
     return result
 
@@ -1728,10 +1723,53 @@ def setFanMinOnTime(child, deviceId, howLong) {
     def thermostatFunctions = ''
     def jsonRequestBody = '{"selection":{"selectionType":"thermostats","selectionMatch":"' + deviceId + '"},"functions":['+thermostatFunctions+']'+thermostatSettings+'}'
 	
+    // Save the previous FanMinOnTime in case needed on resume
+    setPrevFanMinOnTime(child.device.deviceNetworkId, getFanMinOnTime(child))
     def result = sendJson(child, jsonRequestBody)
     LOG("setFanMinOnTime(child) with result ${result}", 3, child)    
 
     return result
+}
+
+
+def getRestoreModesOnChange(deviceNetworkId) {
+	return (atomicState."thermostat-${deviceNetworkId}"?.restoreModesOnChange.toString() == "true")
+}
+
+def restoreModesOnChange(child, deviceId) {
+    def deviceNetworkId = child.device.deviceNetworkId
+    LOG("deviceNetworkId = ${deviceNetworkId}", 5, child, "trace")
+	
+    def previousHVACMode = getPrevHVACMode(child)
+    def currentHVACMode = getHVACMode(child)
+    def previousFanMinOnTime = getPrevFanMinOnTime(deviceNetworkId)
+    def currentFanMinOnTime = getFanMinOnTime(child)
+    def previousFanMode = getPrevFanMode(deviceNetworkId)
+    def currentFanMode = getActiveFanMode(deviceNetworkId)
+
+	if( getRestoreModesOnChange(deviceNetworkId) ) {
+		if ((previousHVACMode != null) && (currentHVACMode != previousHVACMode)) {
+        	LOG("getHVACMode(child) != getPrevHVACMode(child) (${previousHVACMode})", 5, child, "trace")
+			result = setHVACMode(child, deviceId, previousHVACMode)       
+        }
+        
+		if ((previousFanMinOnTime != null) && (currentFanMinOnTime != previousFanMinOnTime)) {
+    		// Need to reset the fanMinOnTime back to the previous settings              
+        
+        	LOG("getFanMinOnTime(child) != getPrevFanMinOnTime(deviceNetworkId) (${previousFanMinOnTime})", 5, child, "trace")
+        	def fanResult = setFanMinOnTime(child, deviceId, previousFanMinOnTime)
+        	result = result && fanResult      
+    	}
+        
+        if ((previousFanMode != null) && (currentFanMode != previousFanMode)) {
+        	// Restore Fan Mode State
+            LOG("getPrevFanMode(deviceNetworkId) - ${previousFanMode}   getActiveFanMode(deviceNetworkId) - ${currentFanMode}", 5, child, "trace")
+            // setFanMode(child, previousFanMode, deviceId) // BAD IDEA: Creates an infinite loops
+        }               
+        
+        // Reset the flag since we have finished updating
+        saveThermoStates(child, false)
+    }
 }
 
 def setHold(child, heating, cooling, deviceId, sendHoldType=null, fanMode="", extraParams=[]) {
@@ -1781,10 +1819,81 @@ def setMode(child, mode, deviceId) {
 	return result
 }
 
+private void saveThermoStates(child, restoreModesOnChange=true) {
+	def deviceNetworkId = child.device.deviceNetworkId
+    
+    LOG("saveThermoStates() entered", 5, child, "trace")
+    LOG("thermostats = ${atomicState.thermostats[deviceNetworkId]}", 5, child, "trace")
+    
+    if (atomicState."thermostat-${deviceNetworkId}" == null) atomicState."thermostat-${deviceNetworkId}" = [:]
+	def thermostatAtomicStateTemp = atomicState."thermostat-${deviceNetworkId}"
+    LOG("temp atomicState thermostatAtomicStateTemp = ${thermostatAtomicStateTemp}", 5, child, "trace")
+
+	thermostatAtomicStateTemp.put("prevFanMinOnTime", getFanMinOnTime(child))
+	thermostatAtomicStateTemp.put("prevHVACMode", getHVACMode(child))	
+    thermostatAtomicStateTemp.put("prevFanMode", getActiveFanMode(deviceNetworkId))
+    thermostatAtomicStateTemp.put("saveThermoStatesTimestamp", getTimestamp())
+	thermostatAtomicStateTemp.put("restoreModesOnChange", restoreModesOnChange)
+    
+    atomicState."thermostat-${deviceNetworkId}" = thermostatAtomicStateTemp
+    
+    LOG("temp atomicState thermostatAtomicStateTemp (after) = ${thermostatAtomicStateTemp}", 5, child, "trace")
+    LOG("getPrevFanMinOnTime = ${getPrevFanMinOnTime(deviceNetworkId)}; getPrevHVACMode = ${getPrevHVACMode(deviceNetworkId)}", 5, child, "trace")
+    
+}
+
+private def setActiveFanMode(child, activeFanMode="auto") {
+	def deviceNetworkId = child.device.deviceNetworkId
+
+	// Allowed modes: on, off, auto, circulate
+    // TODO: Add a check to make sure the fan mode is in the list
+    def allowedFanModes = ["auto", "on", "off", "circulate"]    
+    if( !allowedFanModes.contains(activeFanMode.toLowerCase()) ) {
+    	// activeFanMode was not in the allowed list
+        LOG("activeFanMode not in allowed list: ${activeFanMode}", 4)
+        activeFanMode = "auto"
+    } else {
+    	activeFanMode = activeFanMode.toLowerCase()
+    }
+    
+	if (atomicState."thermostat-${deviceNetworkId}" == null) atomicState."thermostat-${deviceNetworkId}" = [:]
+	def thermostatAtomicStateTemp = atomicState."thermostat-${deviceNetworkId}"
+   	thermostatAtomicStateTemp.put("activeFanMode", activeFanMode)   
+	atomicState."thermostat-${deviceNetworkId}" = thermostatAtomicStateTemp
+
+}
+
+private def getActiveFanMode(deviceNetworkId) {
+	return atomicState."thermostat-${deviceNetworkId}"?.activeFanMode
+}
+
+private void setPrevFanMinOnTime(deviceNetworkId, prevFanMinOnTime) {
+	// TODO: Do I need to copy to a temp and then save back?
+	atomicState."thermostat-${deviceNetworkId}"?.prevFanMinOnTime = prevFanMinOnTime
+}
+
+private def getPrevFanMinOnTime(deviceNetworkId) {
+	return atomicState."thermostat-${deviceNetworkId}"?.prevFanMinOnTime	
+}
+
+private void setPrevHVACMode(deviceNetworkId, prevHVACMode) {
+	// TODO: Do I need to copy to a temp and then save back?
+	atomicState."thermostat-${deviceNetworkId}"?.prevHVACMode = prevHVACMode
+}
+
+private def getPrevHVACMode(deviceNetworkId) {
+	return atomicState."thermostat-${deviceNetworkId}"?.prevHVACMode
+}
+
+private def getPrevFanMode(deviceNetworkId) {
+	LOG("Entered getPrevFanMode()", 5, null, "trace")
+	return atomicState."thermostat-${deviceNetworkId}"?.prevFanMode
+}
 
 def setFanMode(child, fanMode, deviceId, sendHoldType=null) {
-	LOG("setFanMode() to ${fanMode} with DeviceID: ${deviceId}", 5, child)    
-        
+	LOG("setFanMode() to ${fanMode} with DeviceID: ${deviceId}", 5, child)  
+    // TODO: START HERE: Fix the state handling for restoring previous modes. 
+
     // These values are ignored anyway when setting the fan
     def h = child.device.currentValue("heatingSetpoint")
     def c = child.device.currentValue("coolingSetpoint")
@@ -1800,28 +1909,35 @@ def setFanMode(child, fanMode, deviceId, sendHoldType=null) {
         LOG("fanMode == 'circulate'", 5, child, "trace")        
         // Add a minimum circulate time here
         // TODO: Need to capture the previous fanMinOnTime and return to that value when the mode is changed again?
-        atomicState."previousFanMinOnTime${deviceId}" = getFanMinOnTime(child)
-        atomicState."previousHVACMode${deviceId}" = getHVACMode(child)        
-		atomicState.circulateFanModeOn = true
-        atomicState.offFanModeOn = false
-        
+        if(getRestoreModesOnChange(child.device.deviceNetworkId) != true) {
+        	// Already set to restore, no need to save state
+        	saveThermoStates(child, true)
+		}
+        setActiveFanMode(child, "circulate")        
+        LOG("Setting thermostat functions for circulate", 5, child, "trace")
         thermostatSettings = ',"thermostat":{"settings":{"fanMinOnTime":15}}'
         thermostatFunctions = '{"type":"setHold","params":{"coolHoldTemp":"' + c + '","heatHoldTemp":"' + h + '","holdType":"' + holdType + '","fan":"'+fanMode+'","isTemperatureAbsolute":false,"isTemperatureRelative":false}}'
     } else if (fanMode == "off") {
     	// How to turn off the fan http://developer.ecobee.com/api/topics/how-to-turn-fan-off
         // NOTE: Once you turn it off it does not automatically come back on if you select resume program
-        atomicState."previousFanMinOnTime${deviceId}" = getFanMinOnTime(child)
-        atomicState."previousHVACMode${deviceId}" = getHVACMode(child)        
-    	atomicState.circulateFanModeOn = false    
-        atomicState.offFanModeOn = true
+        if(!getRestoreModesOnChange(child.device.deviceNetworkId)) {
+        	// Already set to restore, no need to save state        
+			saveThermoStates(child, true)
+        }
+        setActiveFanMode(child, "off")
         fanMode = "auto"        
         thermostatSettings = ',"thermostat":{"settings":{"hvacMode":"off","fanMinOnTime":0}}'
         thermostatFunctions = ''
     } else {
-		atomicState.circulateFanModeOn = false    
-        atomicState.offFanModeOn = false
-        thermostatSettings = ''
-        thermostatFunctions = '{"type":"setHold","params":{"coolHoldTemp":"' + c + '","heatHoldTemp":"' + h + '","holdType":"' + holdType + '","fan":"'+fanMode+'","isTemperatureAbsolute":false,"isTemperatureRelative":false}}'
+    	// TODO: Check to see if the new fanMode is "auto" and the previous was "circulate"
+    	if(getRestoreModesOnChange(child.device.deviceNetworkId)) {
+        	// We need to restore the previous state before we do anything
+            restoreModesOnChange(child, deviceId)
+            saveThermoStates(child, false)
+        }
+        setActiveFanMode(child, fanMode)
+		thermostatSettings = ''
+		thermostatFunctions = '{"type":"setHold","params":{"coolHoldTemp":"' + c + '","heatHoldTemp":"' + h + '","holdType":"' + holdType + '","fan":"'+fanMode+'","isTemperatureAbsolute":false,"isTemperatureRelative":false}}'
     }    
 	
     // {"selection":{"selectionType":"thermostats","selectionMatch":"XXX"},"functions":[{"type":"setHold","params":{"coolHoldTemp":"73","heatHoldTemp":"66","holdType":"nextTransition","fan":"circulate","isTemperatureAbsolute":false,"isTemperatureRelative":false}}],"thermostat":{"settings":{"fanMinOnTime":15}}}
@@ -1897,7 +2013,7 @@ private def sendJson(child=null, String jsonBody) {
 		if (e.response.data.status.code == 14) {
 	        // atomicState.connected = "warn"
     	    atomicState.savedActionJsonBody = jsonBody
-        	atomicState.savedActionChild = child.deviceNetworkId
+        	atomicState.savedActionChild = child?.deviceNetworkId
         	atomicState.action = "sendJsonRetry"
         	// generateEventLocalParams()
         	refreshAuthToken(child)
@@ -2175,7 +2291,7 @@ private String childType(child) {
     
 }
 
-private getFanMinOnTime(child) {
+private def getFanMinOnTime(child) {
 	LOG("getFanMinOnTime() - Looking up current fanMinOnTime for ${child}", 4, child)
     def devId = getChildThermostatDeviceIdsString(child)
     LOG("Looking for ecobee thermostat ${devId}", 5, child, "trace")
@@ -2186,7 +2302,7 @@ private getFanMinOnTime(child) {
 	return fanMinOnTime
 }
 
-private getHVACMode(child) {
+private def getHVACMode(child) {
 	LOG("Looking up current hvacMode for ${child}", 4, child)
     def devId = getChildThermostatDeviceIdsString(child)
     LOG("Looking for ecobee thermostat ${devId}", 5, child, "trace")
@@ -2232,3 +2348,15 @@ private def dirtyPollData() {
 	atomicState.forcePoll = true
 }
 
+def getHubID() {
+	def hubID
+	if (myHub) {
+		hubID = myHub.id
+	} else {
+		def hubs = location.hubs.findAll{ it.type == physicalgraph.device.HubType.PHYSICAL } 
+        LOG("hub count: ${hubs.size()}", 1)
+		if (hubs.size() == 1) hubID = hubs[0].id 
+    }
+    LOG("hubID: ${hubID}", 1)
+    return hubID
+}
