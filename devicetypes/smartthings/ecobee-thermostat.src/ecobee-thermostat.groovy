@@ -69,6 +69,7 @@ metadata {
 		command "fanMinOnTime45"
 		command "fanMinOnTime60"        
         
+        command "fanCirculate"
         command "fanOff"  // Missing from the Thermostat standard capability set
         command "noOp" // Workaround for formatting issues 
         command "setStateVariable"
@@ -185,6 +186,7 @@ metadata {
 			state "cool", action:"thermostat.auto",  label: "Set Mode", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_cool.png"
 			state "auto", action:"thermostat.off",  label: "Set Mode", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_auto.png"
             // Not included in the button loop, but if already in "auxHeatOnly" pressing button will go to "auto"
+            state "emergency heat", action:"thermostat.auto", icon: "st.thermostat.emergency-heat"
 			state "auxHeatOnly", action:"thermostat.auto", icon: "st.thermostat.emergency-heat"
 			state "updating", label:"Working", icon: "st.secondary.secondary"
 		}
@@ -195,7 +197,8 @@ metadata {
 			state "cool", action:"noOp",  label: "Cool", nextState: "cool", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_cool.png"
 			state "auto", action:"noOp",  label: "Auto", nextState: "auto", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_auto.png"
             // Not included in the button loop, but if already in "auxHeatOnly" pressing button will go to "auto"
-			state "auxHeatOnly", action:"noOp", icon: "st.thermostat.emergency-heat"
+			state "emergency heat", action:"noOp", icon: "st.thermostat.emergency-heat"
+            state "auxHeatOnly", action:"noOp", icon: "st.thermostat.emergency-heat"
 			state "updating", label:"Working", icon: "st.secondary.secondary"
 		}
         
@@ -238,7 +241,7 @@ metadata {
         
 		standardTile("fanMode", "device.thermostatFanMode", width: 2, height: 2, inactiveLabel: false, decoration: "flat") {
 			state "on", action:"thermostat.fanAuto", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan_big_nolabel.png"
-            state "auto", action:"thermostat.fanOn", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan_big_nolabel.png"
+            state "auto", action:"thermostat.fanCirculate", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan_big_nolabel.png"
             state "off", action:"thermostat.fanAuto", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan_big_nolabel.png"
 			state "circulate", action:"thermostat.fanAuto", nextState: "updating", icon: "https://raw.githubusercontent.com/StrykerSKS/SmartThings/master/smartapp-icons/ecobee/png/systemmode_fan_big_nolabel.png"
             state "updating", label:"Working", icon: "st.secondary.secondary"
@@ -716,13 +719,13 @@ void resumeProgram() {
 
 def setFanMinOnTime(howLong=0) {
 	LOG("setFanMinOnTime() called with value: ${howLong}", 5)
-    if (device.currentValue("fanMinOnTime") == howLong) return true
+    if (device.currentValue("fanMinOnTime") == howLong) return
+    // XXX: Throws an error if I return a Boolean
     
     generateQuickEvent("fanMinOnTime", howLong)
     def result = parent.setFanMinOnTime(this, deviceId, howLong)
-    if (result) generateQuickEvent("fanMinOnTime", howLong, 30)
+    if (result) generateQuickEvent("fanMinOnTime", howLong, 30)    
     
-    return result
 }
 
 def fanMinOnTime0() {
